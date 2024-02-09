@@ -22,14 +22,7 @@ package soot;
  * #L%
  */
 
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,19 +34,19 @@ import java.util.zip.ZipFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import soot.util.SharedCloseable;
+import soot.util.SharedResource;
 
 public class FoundFile implements IFoundFile {
   private static final Logger logger = LoggerFactory.getLogger(FoundFile.class);
 
-  protected final List<InputStream> openedInputStreams = new ArrayList<InputStream>();
+  protected final List<InputStream> openedInputStreams = new ArrayList<>();
 
   protected Path path;
 
   protected File file;
   protected String entryName;
 
-  protected SharedCloseable<ZipFile> zipFile;
+  protected SharedResource<ZipFile> zipFile;
   protected ZipEntry zipEntry;
 
   public FoundFile(String archivePath, String entryName) {
@@ -78,16 +71,11 @@ public class FoundFile implements IFoundFile {
 
   @Override
   public String getFilePath() {
-    if (file == null) {
-      if (path != null) {
-        File f = path.toFile();
-        if (f != null) {
-          return f.getPath();
-        }
-      }
-      return null;
-    }
-    return file.getPath();
+    if (file != null)
+      return file.getPath();
+    if (path != null)
+      return path.toFile().getPath();
+    return null;
   }
 
   @Override
@@ -133,20 +121,20 @@ public class FoundFile implements IFoundFile {
     } else {
       if (zipFile == null) {
         try {
-          zipFile = SourceLocator.v().archivePathToZip.getRef(file.getPath());
-          zipEntry = zipFile.get().getEntry(entryName);
-          if (zipEntry == null) {
-            silentClose();
-            throw new RuntimeException(
-                "Error: Failed to find entry '" + entryName + "' in the archive file at path '" + file.getPath() + "'.");
-          }
+          zipFile = SourceLocator.v().archivePathToZip.get(file.getPath());
         } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+
+        zipEntry = zipFile.get().getEntry(entryName);
+        if (zipEntry == null) {
           silentClose();
           throw new RuntimeException(
-              "Error: Failed to open the archive file at path '" + file.getPath() + "' for entry '" + entryName + "'.", e);
+                  "Error: Failed to find entry '" + entryName + "' in the archive file at path '" + file.getPath() + "'.");
         }
       }
       try (InputStream stream = zipFile.get().getInputStream(zipEntry)) {
+        // Converts the input stream to a ByteArrayInputStream
         ret = doJDKBugWorkaround(stream, zipEntry.getSize());
       } catch (Exception e) {
         throw new RuntimeException("Error: Failed to open a InputStream for the entry '" + zipEntry.getName()
@@ -154,26 +142,31 @@ public class FoundFile implements IFoundFile {
       }
     }
 
-    ret = new BufferedInputStream(ret);
     openedInputStreams.add(ret);
     return ret;
   }
 
   @Override
   public void close() {
-    // Try to close all opened input streams
-    List<Exception> errs = new ArrayList<Exception>(0);
+    List<Throwable> errs = new ArrayList<>();
     for (InputStream is : openedInputStreams) {
       try {
         is.close();
       } catch (Exception e) {
-        errs.add(e);// record errors for later
+        errs.add(e);
       }
     }
-    openedInputStreams.clear();
-    closeZipFile(errs);
 
-    // Throw single exception combining all errors
+    try {
+      if (zipFile != null)
+        zipFile.close();
+    } catch (Exception e) {
+      errs.add(e);
+    }
+
+    zipFile = null;
+    zipEntry = null;
+
     if (!errs.isEmpty()) {
       String msg = null;
       ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -187,25 +180,10 @@ public class FoundFile implements IFoundFile {
           logger.error(t.getMessage(), t);
         }
         msg = new String(baos.toByteArray(), StandardCharsets.UTF_8);
-      } catch (Exception e) {
-        // Do nothing as this will never occur
+      } catch (UnsupportedEncodingException e) {
+        //
       }
       throw new RuntimeException(msg);
-    }
-  }
-
-  protected void closeZipFile(List<Exception> errs) {
-    // Try to close the opened zip file if it exists
-    if (zipFile != null) {
-      try {
-        zipFile.close();
-        errs.clear();// Successfully closed the archive so all input
-        // streams were closed successfully also
-      } catch (Exception e) {
-        errs.add(e);
-      }
-      zipFile = null;// set to null no matter what
-      zipEntry = null;// set to null no matter what
     }
   }
 
