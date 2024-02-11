@@ -66,6 +66,7 @@ import soot.dotnet.AssemblyFile;
 import soot.dotnet.DotnetClassProvider;
 import soot.options.Options;
 import soot.util.SharedCloseable;
+import soot.util.ZipFileCache;
 
 /**
  * Provides utility methods to retrieve an input stream for a class name, given a classfile, or jimple or baf output files.
@@ -98,7 +99,7 @@ public class SourceLocator {
   // traversing each path in the classpath will cause cache thrashing.
   private static final int PATH_CACHE_CAPACITY = 100000;
 
-  final SharedZipFileCacheWrapper archivePathToZip = new SharedZipFileCacheWrapper(5, PATH_CACHE_CAPACITY);
+  final ZipFileCache archivePathToZip = new ZipFileCache();
 
   // NOTE: Soft and weak references are useless here since the value is an
   // enum type and strings are interned.
@@ -147,9 +148,9 @@ public class SourceLocator {
           .concurrencyLevel(Runtime.getRuntime().availableProcessors()).build(new CacheLoader<String, Set<String>>() {
             @Override
             public Set<String> load(String archivePath) throws Exception {
-              try (SharedCloseable<ZipFile> archive = archivePathToZip.getRef(archivePath)) {
+              try (ZipFile archive = archivePathToZip.get(archivePath)) {
                 Set<String> ret = new HashSet<String>();
-                for (Enumeration<? extends ZipEntry> it = archive.get().entries(); it.hasMoreElements();) {
+                for (Enumeration<? extends ZipEntry> it = archive.entries(); it.hasMoreElements();) {
                   ret.add(it.nextElement().getName());
                 }
                 return Collections.unmodifiableSet(ret);
@@ -381,8 +382,8 @@ public class SourceLocator {
       }
     } else if (cst == ClassSourceType.jar || cst == ClassSourceType.zip) {
       // load Java class files from ZIP and JAR
-      try (SharedCloseable<ZipFile> archive = archivePathToZip.getRef(aPath)) {
-        for (Enumeration<? extends ZipEntry> entries = archive.get().entries(); entries.hasMoreElements();) {
+      try (ZipFile archive = archivePathToZip.get(aPath)) {
+        for (Enumeration<? extends ZipEntry> entries = archive.entries(); entries.hasMoreElements();) {
           ZipEntry entry = entries.nextElement();
           String entryName = entry.getName();
           if (entryName.endsWith(".class") || entryName.endsWith(".jimple")) {

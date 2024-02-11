@@ -53,7 +53,7 @@ public class FoundFile implements IFoundFile {
   protected File file;
   protected String entryName;
 
-  protected SharedCloseable<ZipFile> zipFile;
+  protected ZipFile zipFile;
   protected ZipEntry zipEntry;
 
   public FoundFile(String archivePath, String entryName) {
@@ -97,7 +97,7 @@ public class FoundFile implements IFoundFile {
 
   @Override
   public ZipFile getZipFile() {
-    return zipFile != null ? zipFile.get() : null;
+    return zipFile;
   }
 
   @Override
@@ -133,8 +133,8 @@ public class FoundFile implements IFoundFile {
     } else {
       if (zipFile == null) {
         try {
-          zipFile = SourceLocator.v().archivePathToZip.getRef(file.getPath());
-          zipEntry = zipFile.get().getEntry(entryName);
+          zipFile = SourceLocator.v().archivePathToZip.get(file.getPath());
+          zipEntry = zipFile.getEntry(entryName);
           if (zipEntry == null) {
             silentClose();
             throw new RuntimeException(
@@ -146,11 +146,11 @@ public class FoundFile implements IFoundFile {
               "Error: Failed to open the archive file at path '" + file.getPath() + "' for entry '" + entryName + "'.", e);
         }
       }
-      try (InputStream stream = zipFile.get().getInputStream(zipEntry)) {
+      try (InputStream stream = zipFile.getInputStream(zipEntry)) {
         ret = doJDKBugWorkaround(stream, zipEntry.getSize());
       } catch (Exception e) {
         throw new RuntimeException("Error: Failed to open a InputStream for the entry '" + zipEntry.getName()
-            + "' of the archive at path '" + zipFile.get().getName() + "'.", e);
+            + "' of the archive at path '" + zipFile.getName() + "'.", e);
       }
     }
 
@@ -197,13 +197,13 @@ public class FoundFile implements IFoundFile {
   protected void closeZipFile(List<Exception> errs) {
     // Try to close the opened zip file if it exists
     if (zipFile != null) {
-      try {
-        zipFile.close();
-        errs.clear();// Successfully closed the archive so all input
-        // streams were closed successfully also
-      } catch (Exception e) {
-        errs.add(e);
-      }
+//      try {
+//        zipFile.close();
+//        errs.clear();// Successfully closed the archive so all input
+//        // streams were closed successfully also
+//      } catch (Exception e) {
+//        errs.add(e);
+//      }
       zipFile = null;// set to null no matter what
       zipEntry = null;// set to null no matter what
     }
